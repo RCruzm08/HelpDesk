@@ -1,6 +1,102 @@
 <?php
 
 namespace App\Http\Controllers;
+
+use App\Http\Requests\TicketRequest;
+use App\Models\Department;
+use App\Models\Ticket;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
+
+class TicketController extends Controller
+{
+    public function index(Request $request): View
+    {
+        $search = trim((string) $request->query('search', ''));
+        $departmentId = $request->query('department_id');
+        $status = $request->query('status');
+
+        $tickets = Ticket::query()
+            ->with('department')
+            ->when($search !== '', function ($query) use ($search): void {
+                $query->where(function ($query) use ($search): void {
+                    $query->where('title', 'like', "%{$search}%")
+                        ->orWhere('requester_name', 'like', "%{$search}%");
+                });
+            })
+            ->when($departmentId, fn ($query) => $query->where('department_id', $departmentId))
+            ->when($status, fn ($query) => $query->where('status', $status))
+            ->latest()
+            ->paginate(6)
+            ->withQueryString();
+
+        $departments = Department::query()->orderBy('name')->get();
+        $statistics = [
+            'total' => Ticket::query()->count(),
+            'open' => Ticket::query()->where('status', 'Aberto')->count(),
+            'in_progress' => Ticket::query()->where('status', 'Em Atendimento')->count(),
+            'completed' => Ticket::query()->where('status', 'Concluído')->count(),
+        ];
+
+        return view('tickets.index', compact('tickets', 'departments', 'statistics'));
+    }
+
+    public function create(): View
+    {
+        $departments = Department::query()->orderBy('name')->get();
+
+        return view('tickets.create', compact('departments'));
+    }
+
+    public function store(TicketRequest $request): RedirectResponse
+    {
+        Ticket::query()->create($request->validated());
+
+        return redirect()
+            ->route('tickets.index')
+            ->with('success', 'Chamado aberto com sucesso!');
+    }
+
+    public function edit(Ticket $ticket): View
+    {
+        $departments = Department::query()->orderBy('name')->get();
+
+        return view('tickets.edit', compact('ticket', 'departments'));
+    }
+
+    public function update(TicketRequest $request, Ticket $ticket): RedirectResponse
+    {
+        $ticket->update($request->validated());
+
+        return redirect()
+            ->route('tickets.index')
+            ->with('success', 'Chamado atualizado com sucesso!');
+    }
+
+    public function toggleStatus(Ticket $ticket): RedirectResponse
+    {
+        $ticket->update([
+            'status' => match ($ticket->status) {
+                'Aberto' => 'Em Atendimento',
+                'Em Atendimento' => 'Concluído',
+                default => 'Aberto',
+            },
+        ]);
+
+        return redirect()
+            ->back()
+            ->with('success', "Status do chamado #{$ticket->id} atualizado para {$ticket->status}.");
+    }
+
+    public function destroy(Ticket $ticket): RedirectResponse
+    {
+        $ticket->delete();
+
+        return redirect()
+            ->route('tickets.index')
+            ->with('success', 'Chamado excluído com sucesso!');
+    }
 use App\Http\Requests\TicketRequest;
 use App\Models\Ticket;
 use App\Models\Department;
